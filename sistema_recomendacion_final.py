@@ -13,50 +13,51 @@ def encontrar_archivo_dataset():
     print(" Buscando archivo del dataset...")
     
     patrones = [
-        'full-00000-of-00001.parquet.as.json',
-        'full*.json',
-        '*.parquet.as.json', 
-        'amazon*.json',
-        'review*.json',
-        '*.json'
+        'full-00000-of-00001.parquet',
+        'full*.parquet',
+        '*.parquet', 
+        'amazon*.parquet',
+        'review*.parquet',
+        '*.json',
+        '*.csv'
     ]
     
     for patron in patrones:
         archivos = glob.glob(patron)
         for archivo in archivos:
             if os.path.isfile(archivo) and os.path.getsize(archivo) > 0:
-                print(f"✅ Archivo encontrado: {archivo}")
+                print(f" Archivo encontrado: {archivo}")
                 return archivo
     
-    print("❌ No se encontró el archivo del dataset")
+    print(" No se encontró el archivo del dataset")
     return None
 
 def cargar_dataset(ruta_archivo):
     """Cargar el dataset con manejo de errores"""
     try:
-        print(f"📥 Cargando dataset desde: {ruta_archivo}")
+        print(f" Cargando dataset desde: {ruta_archivo}")
         
         # Intentar diferentes métodos de carga
-        if ruta_archivo.endswith('.json'):
-            df = pd.read_json(ruta_archivo, lines=True)
-        elif ruta_archivo.endswith('.parquet'):
+        if ruta_archivo.endswith('.parquet'):
             df = pd.read_parquet(ruta_archivo)
+        elif ruta_archivo.endswith('.json'):
+            df = pd.read_json(ruta_archivo, lines=True)
         elif ruta_archivo.endswith('.csv'):
             df = pd.read_csv(ruta_archivo)
         else:
-            # Intentar leer como JSON por defecto
-            df = pd.read_json(ruta_archivo, lines=True)
+            # Intentar leer como Parquet por defecto
+            df = pd.read_parquet(ruta_archivo)
             
-        print(f"✅ Dataset cargado: {len(df)} registros")
+        print(f" Dataset cargado: {len(df)} registros")
         return df
         
     except Exception as e:
-        print(f"❌ Error cargando el archivo: {e}")
+        print(f" Error cargando el archivo: {e}")
         return None
 
 def crear_dataset_ejemplo():
     """Crear dataset de ejemplo si no se encuentra el archivo real"""
-    print("🔄 Creando dataset de ejemplo...")
+    print(" Creando dataset de ejemplo...")
     
     # Datos de ejemplo realistas de Amazon
     datos_ejemplo = {
@@ -77,11 +78,113 @@ def crear_dataset_ejemplo():
     }
     
     df = pd.DataFrame(datos_ejemplo)
-    print(f"✅ Dataset de ejemplo creado: {len(df)} productos")
+    print(f" Dataset de ejemplo creado: {len(df)} productos")
     return df
 
+def procesar_dataset_real(df):
+    """Procesar el dataset real para extraer transacciones reales"""
+    print(f"\n PROCESANDO DATASET REAL...")
+    
+    # Verificar columnas disponibles
+    print(f" Columnas disponibles: {list(df.columns)}")
+    
+    # Buscar columnas que puedan contener información de transacciones
+    columnas_posibles = {
+        'user_id': ['user_id', 'userID', 'userId', 'customer_id', 'reviewerID'],
+        'product_id': ['product_id', 'productID', 'productId', 'asin', 'item_id'],
+        'product_title': ['title', 'product_title', 'product_name', 'name'],
+        'category': ['main_category', 'category', 'categories', 'mainCategory'],
+        'rating': ['rating', 'average_rating', 'overall', 'reviewRating']
+    }
+    
+    # Mapear columnas reales
+    columnas_mapeadas = {}
+    for tipo, opciones in columnas_posibles.items():
+        for opcion in opciones:
+            if opcion in df.columns:
+                columnas_mapeadas[tipo] = opcion
+                break
+    
+    print(f" Columnas mapeadas: {columnas_mapeadas}")
+    
+    # Verificar si tenemos suficiente información para transacciones
+    if 'user_id' not in columnas_mapeadas or 'product_id' not in columnas_mapeadas:
+        print(" AVISO: No se encontraron columnas de usuario y producto para transacciones reales")
+        print(" Se usarán datos simulados basados en el dataset real")
+        return simular_transacciones_inteligentes(df)
+    
+    # Crear transacciones reales agrupando por usuario
+    print(f" Creando transacciones reales...")
+    
+    # Agrupar productos por usuario
+    columna_usuario = columnas_mapeadas['user_id']
+    columna_producto = columnas_mapeadas.get('product_title', columnas_mapeadas['product_id'])
+    
+    transacciones_reales = df.groupby(columna_usuario)[columna_producto].apply(list).reset_index()
+    
+    print(f" Transacciones reales encontradas: {len(transacciones_reales)}")
+    print(f" Ejemplo de transacción: {transacciones_reales.iloc[0][columna_producto][:3]}...")
+    
+    # Crear DataFrame de transacciones para el análisis
+    transacciones_lista = []
+    for _, row in transacciones_reales.iterrows():
+        user_id = row[columna_usuario]
+        productos = row[columna_producto]
+        
+        for producto in productos:
+            # Buscar información adicional del producto
+            producto_info = df[df[columna_producto] == producto].iloc[0]
+            
+            transaccion = {
+                'user_id': user_id,
+                'product_title': producto
+            }
+            
+            # Agregar información adicional si está disponible
+            if 'category' in columnas_mapeadas:
+                transaccion['main_category'] = producto_info[columnas_mapeadas['category']]
+            if 'rating' in columnas_mapeadas:
+                transaccion['rating'] = producto_info[columnas_mapeadas['rating']]
+            
+            transacciones_lista.append(transaccion)
+    
+    df_transacciones = pd.DataFrame(transacciones_lista)
+    
+    print(f" Registros de transacciones: {len(df_transacciones)}")
+    print(f" Usuarios únicos: {df_transacciones['user_id'].nunique()}")
+    print(f" Productos únicos: {df_transacciones['product_title'].nunique()}")
+    
+    return df_transacciones
+
+def simular_transacciones_inteligentes(df):
+    """Función de respaldo si no hay suficientes datos reales"""
+    print(" Simulando transacciones basadas en datos reales...")
+    
+    transacciones = []
+    productos_disponibles = df['title'].tolist() if 'title' in df.columns else df.iloc[:, 0].tolist()
+    
+    print(f" Productos disponibles: {len(productos_disponibles)}")
+    
+    # Generar transacciones para 200 usuarios
+    for i in range(200):
+        user_id = f"U{i+1:04d}"
+        n_compras = np.random.randint(2, 6)
+        
+        productos_comprados = np.random.choice(productos_disponibles, n_compras, replace=False)
+        
+        for producto in productos_comprados:
+            transacciones.append({
+                'user_id': user_id,
+                'product_title': producto
+            })
+    
+    df_transacciones = pd.DataFrame(transacciones)
+    print(f" Transacciones simuladas: {len(df_transacciones)}")
+    
+    return df_transacciones
+
 # --- PROGRAMA PRINCIPAL ---
-print("🚀 SISTEMA DE RECOMENDACIÓN APRIORI")
+print(" SISTEMA DE RECOMENDACIÓN APRIORI - DATOS REALES")
 print("=" * 60)
 
 # 1. Buscar y cargar dataset
@@ -90,122 +193,47 @@ ruta_dataset = encontrar_archivo_dataset()
 if ruta_dataset:
     df = cargar_dataset(ruta_dataset)
 else:
-    print("📦 Usando dataset de ejemplo...")
+    print(" Usando dataset de ejemplo...")
     df = crear_dataset_ejemplo()
 
 if df is None:
-    print("❌ No se pudo cargar ningún dataset. Saliendo...")
+    print(" No se pudo cargar ningún dataset. Saliendo...")
     exit()
 
 # 2. Mostrar información del dataset
-print(f"\n📊 INFORMACIÓN DEL DATASET:")
+print(f"\n INFORMACIÓN DEL DATASET:")
 print(f"   - Total de registros: {len(df)}")
 print(f"   - Columnas disponibles: {list(df.columns)}")
 print(f"   - Primeras filas:")
 print(df.head(3))
 
-# 3. Simular transacciones de usuarios
-print(f"\n🔄 SIMULANDO TRANSACCIONES DE USUARIOS...")
-
-def simular_transacciones_inteligentes(df, n_usuarios=300):
-    """Simular transacciones realistas basadas en categorías y ratings"""
-    
-    transacciones = []
-    productos_disponibles = df['title'].tolist()
-    
-    print(f"   🛍️  Productos disponibles: {len(productos_disponibles)}")
-    
-    # Crear patrones de compra por categoría
-    categorias = df['main_category'].unique()
-    patrones_compra = {}
-    
-    for categoria in categorias:
-        productos_categoria = df[df['main_category'] == categoria]['title'].tolist()
-        if len(productos_categoria) >= 2:
-            patrones_compra[categoria] = productos_categoria
-    
-    # Generar transacciones para cada usuario
-    for i in range(n_usuarios):
-        user_id = f"U{i+1:04d}"
-        
-        # Cada usuario compra 3-6 productos
-        n_compras = np.random.randint(3, 7)
-        productos_comprados = []
-        
-        # Patrón 1: Comprar productos de la misma categoría
-        if patrones_compra:
-            categoria_elegida = np.random.choice(list(patrones_compra.keys()))
-            productos_categoria = patrones_compra[categoria_elegida]
-            n_en_categoria = min(2, len(productos_categoria))
-            
-            if n_en_categoria > 0:
-                productos_cat = np.random.choice(productos_categoria, n_en_categoria, replace=False)
-                productos_comprados.extend(productos_cat)
-        
-        # Patrón 2: Productos con alto rating
-        productos_alto_rating = df[df['average_rating'] >= 4.0]['title'].tolist()
-        if productos_alto_rating:
-            n_alto_rating = min(2, len(productos_alto_rating))
-            productos_rating = np.random.choice(productos_alto_rating, n_alto_rating, replace=False)
-            productos_comprados.extend(productos_rating)
-        
-        # Patrón 3: Productos populares (muchos ratings)
-        if 'rating_number' in df.columns:
-            productos_populares = df.nlargest(10, 'rating_number')['title'].tolist()
-            if productos_populares:
-                productos_comprados.extend(np.random.choice(productos_populares, 1, replace=False))
-        
-        # Eliminar duplicados y asegurar número correcto
-        productos_comprados = list(set(productos_comprados))
-        if len(productos_comprados) > n_compras:
-            productos_comprados = np.random.choice(productos_comprados, n_compras, replace=False)
-        
-        # Agregar a transacciones
-        for producto in productos_comprados:
-            categoria = df[df['title'] == producto]['main_category'].iloc[0]
-            rating = df[df['title'] == producto]['average_rating'].iloc[0]
-            
-            transacciones.append({
-                'user_id': user_id,
-                'product_title': producto,
-                'main_category': categoria,
-                'rating': rating
-            })
-    
-    df_transacciones = pd.DataFrame(transacciones)
-    print(f"   ✅ Transacciones simuladas: {len(df_transacciones)}")
-    print(f"   👥 Usuarios únicos: {df_transacciones['user_id'].nunique()}")
-    print(f"   🛍️  Productos únicos: {df_transacciones['product_title'].nunique()}")
-    
-    return df_transacciones
-
-# Generar transacciones
-df_transacciones = simular_transacciones_inteligentes(df, n_usuarios=200)
+# 3. Procesar transacciones reales
+df_transacciones = procesar_dataset_real(df)
 
 # 4. Preparar datos para Apriori
-print(f"\n🔧 PREPARANDO DATOS PARA ALGORITMO APRIORI...")
+print(f"\n PREPARANDO DATOS PARA ALGORITMO APRIORI...")
 
 # Agrupar por usuario
 transacciones_agrupadas = df_transacciones.groupby('user_id')['product_title'].apply(list).tolist()
 
-print(f"   📊 Total de transacciones: {len(transacciones_agrupadas)}")
-print(f"   🎯 Ejemplo: Usuario {df_transacciones['user_id'].iloc[0]} compró {len(transacciones_agrupadas[0])} productos")
+print(f"    Total de transacciones: {len(transacciones_agrupadas)}")
+print(f"    Ejemplo: Usuario {df_transacciones['user_id'].iloc[0]} compró {len(transacciones_agrupadas[0])} productos")
 
 # Codificar transacciones
 te = TransactionEncoder()
 te_array = te.fit(transacciones_agrupadas).transform(transacciones_agrupadas)
 df_encoded = pd.DataFrame(te_array, columns=te.columns_)
 
-print(f"   🔤 Productos únicos en transacciones: {len(te.columns_)}")
+print(f"    Productos únicos en transacciones: {len(te.columns_)}")
 
 # 5. Ejecutar algoritmo Apriori
-print(f"\n🎯 EJECUTANDO ALGORITMO APRIORI...")
+print(f"\n EJECUTANDO ALGORITMO APRIORI...")
 
 # Parámetros ajustables
 min_support = 0.03
 min_confidence = 0.4
 
-print(f"   ⚙️  Parámetros: min_support={min_support}, min_confidence={min_confidence}")
+print(f"     Parámetros: min_support={min_support}, min_confidence={min_confidence}")
 
 frequent_itemsets = apriori(
     df_encoded, 
@@ -214,7 +242,7 @@ frequent_itemsets = apriori(
     max_len=2
 )
 
-print(f"   ✅ Itemsets frecuentes encontrados: {len(frequent_itemsets)}")
+print(f"    Itemsets frecuentes encontrados: {len(frequent_itemsets)}")
 
 if len(frequent_itemsets) > 0:
     # Generar reglas
@@ -227,11 +255,11 @@ if len(frequent_itemsets) > 0:
     # Filtrar reglas útiles
     rules = rules[rules['lift'] > 1.0]
     
-    print(f"   🔗 Reglas de asociación generadas: {len(rules)}")
+    print(f"    Reglas de asociación generadas: {len(rules)}")
     
     # 6. Mostrar resultados
     if len(rules) > 0:
-        print(f"\n📈 MEJORES REGLAS DE ASOCIACIÓN:")
+        print(f"\n MEJORES REGLAS DE ASOCIACIÓN:")
         print("=" * 70)
         
         rules_sorted = rules.sort_values(['confidence', 'lift'], ascending=[False, False])
@@ -242,21 +270,21 @@ if len(frequent_itemsets) > 0:
             
             print(f"{i}. SI compras: {antecedente}")
             print(f"   ENTONCES probablemente compres: {consecuente}")
-            print(f"   📊 Soporte: {rule['support']:.3f} | 🎯 Confianza: {rule['confidence']:.3f} | 🚀 Lift: {rule['lift']:.3f}")
+            print(f"    Soporte: {rule['support']:.3f} |  Confianza: {rule['confidence']:.3f} | 🚀 Lift: {rule['lift']:.3f}")
             print()
             
     else:
-        print("❌ No se generaron reglas con los parámetros actuales")
-        print("💡 Sugerencia: Reduce min_confidence a 0.3 o min_support a 0.02")
+        print(" No se generaron reglas con los parámetros actuales")
+        print(" Sugerencia: Reduce min_confidence a 0.3 o min_support a 0.02")
         
 else:
-    print("❌ No se encontraron itemsets frecuentes")
-    print("💡 Sugerencia: Reduce min_support a 0.02")
+    print(" No se encontraron itemsets frecuentes")
+    print(" Sugerencia: Reduce min_support a 0.02")
 
 # 7. Sistema de recomendación
 def recomendar_productos(producto_entrada, rules, df_original, top_n=3):
     """Sistema de recomendación simple"""
-    print(f"\n🎯 RECOMENDACIONES PARA: {producto_entrada}")
+    print(f"\n RECOMENDACIONES PARA: {producto_entrada}")
     print("-" * 50)
     
     recomendaciones = []
@@ -268,13 +296,11 @@ def recomendar_productos(producto_entrada, rules, df_original, top_n=3):
             for consecuente in rule['consequents']:
                 if consecuente != producto_entrada:
                     # Buscar info del producto
-                    producto_info = df_original[df_original['title'] == consecuente]
+                    producto_info = df_original[df_original['title'] == consecuente] if 'title' in df_original.columns else df_original[df_original.iloc[:, 0] == consecuente]
                     if not producto_info.empty:
                         info = producto_info.iloc[0]
                         recomendaciones.append({
                             'producto': consecuente,
-                            'categoria': info['main_category'],
-                            'rating': info['average_rating'],
                             'confidence': rule['confidence'],
                             'lift': rule['lift'],
                             'score': rule['confidence'] * rule['lift']
@@ -295,18 +321,17 @@ def recomendar_productos(producto_entrada, rules, df_original, top_n=3):
     if recomendaciones_unicas:
         for i, rec in enumerate(recomendaciones_unicas[:top_n], 1):
             print(f"{i}. {rec['producto']}")
-            print(f"   📁 Categoría: {rec['categoria']} | ⭐ Rating: {rec['rating']}")
-            print(f"   🎯 Confianza: {rec['confidence']:.3f} | 🚀 Lift: {rec['lift']:.3f}")
+            print(f"    Confianza: {rec['confidence']:.3f} |  Lift: {rec['lift']:.3f}")
             print()
     else:
-        print("❌ No se encontraron recomendaciones para este producto")
-        print("💡 Prueba con otro producto o ajusta los parámetros del algoritmo")
+        print(" No se encontraron recomendaciones para este producto")
+        print(" Sugerencia: Prueba con otro producto o ajusta los parámetros del algoritmo")
     
     return recomendaciones_unicas[:top_n]
 
 # 8. Probar el sistema
 if 'rules' in locals() and len(rules) > 0:
-    print(f"\n🧪 PROBANDO SISTEMA DE RECOMENDACIÓN...")
+    print(f"\n PROBANDO SISTEMA DE RECOMENDACIÓN...")
     
     # Usar productos populares para prueba
     productos_populares = df_transacciones['product_title'].value_counts().head(3).index.tolist()
@@ -315,15 +340,15 @@ if 'rules' in locals() and len(rules) > 0:
         recomendar_productos(producto, rules, df, top_n=2)
 
 # 9. Guardar resultados
-print(f"\n💾 GUARDANDO RESULTADOS...")
+print(f"\n GUARDANDO RESULTADOS...")
 
-df_transacciones.to_csv('transacciones_.csv', index=False)
-print("✅ Transacciones guardadas en 'transacciones_.csv'")
+df_transacciones.to_csv('transacciones_reales.csv', index=False)
+print(" Transacciones guardadas en 'transacciones_reales.csv'")
 
 if 'rules' in locals() and len(rules) > 0:
-    rules.to_csv('reglas_asociacion.csv', index=False)
-    print("✅ Reglas de asociación guardadas en 'reglas_asociacion.csv'")
+    rules.to_csv('reglas_asociacion_reales.csv', index=False)
+    print(" Reglas de asociación guardadas en 'reglas_asociacion_reales.csv'")
 
-print(f"\n🎉 SISTEMA DE RECOMENDACIÓN COMPLETADO!")
-print(f"   📈 Itemsets frecuentes: {len(frequent_itemsets)}")
-print(f"   🔗 Reglas generadas: {len(rules) if 'rules' in locals() else 0}")
+print(f"\n SISTEMA DE RECOMENDACIÓN COMPLETADO!")
+print(f"   Itemsets frecuentes: {len(frequent_itemsets)}")
+print(f"   Reglas generadas: {len(rules) if 'rules' in locals() else 0}")
